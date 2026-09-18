@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "driver-emotion-mqtt"
+version = "0.1.0"
+description = "Driver emotion detection from video with MQTT telemetry"
+readme = "README.md"
+requires-python = ">=3.10,<3.13"
+license = { text = "MIT" }
+authors = [{ name = "Elena Lopez Tomas" }]
+dependencies = [
+    "amqtt>=0.11,<1",
+    "fer>=22.5.1,<23",
+    "mtcnn>=0.1.1,<1",
+    "opencv-python>=4.8,<5",
+    "paho-mqtt>=2.1,<3",
+    "tensorflow>=2.15,<2.18",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8,<9",
+    "ruff>=0.6,<1",
+]
+
+[project.scripts]
+driver-emotion = "driver_emotion_mqtt.main:run"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py310"
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
