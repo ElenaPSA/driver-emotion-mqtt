@@ -40,7 +40,7 @@ class Settings:
         default_factory=lambda: int(os.getenv("PROCESS_EVERY_N_FRAMES", "1"))
     )
     display_video: bool = field(
-        default_factory=lambda: _as_bool("DISPLAY_VIDEO", True)
+        default_factory=lambda: _as_bool("DISPLAY_VIDEO", False)
     )
     use_mtcnn: bool = field(
         default_factory=lambda: _as_bool("USE_MTCNN", True)
