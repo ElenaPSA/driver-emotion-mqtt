@@ -1,0 +1,8 @@
+# Python virtual environment
+driver-emotion/
+
+# Generated video input
+output.mp4
+
+# Generated package metadata
+*.egg-info/
