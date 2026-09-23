@@ -65,27 +65,55 @@ class MqttPublisher:
             self.disconnect()
             raise ConnectionError(self.connection_error)
 
-    def publish(self, payload: dict[str, Any]) -> bool:
-        if not self.connected.is_set():
-            logger.error("Cannot publish because MQTT is disconnected")
-            return False
+    def publish(
+    self,
+    payload: dict[str, Any],
+) -> bool:
+    if not self.connected.is_set():
+        logger.error(
+            "Cannot publish because MQTT is disconnected"
+        )
+        return False
 
-        message = json.dumps(
-            to_json_value(payload),
-            ensure_ascii=False,
-            allow_nan=False,
-            separators=(",", ":"),
+    message = json.dumps(
+        to_json_value(payload),
+        ensure_ascii=False,
+        allow_nan=False,
+        separators=(",", ":"),
+    )
+
+    result = self.client.publish(
+        self.settings.mqtt_topic,
+        message,
+        qos=self.settings.mqtt_qos,
+        retain=self.settings.mqtt_retain,
+    )
+
+    if result.rc != mqtt.MQTT_ERR_SUCCESS:
+        logger.error(
+            "MQTT publish failed with code %s",
+            result.rc,
         )
-        result = self.client.publish(
-            self.settings.mqtt_topic,
-            message,
-            qos=self.settings.mqtt_qos,
-            retain=self.settings.mqtt_retain,
+        return False
+
+    try:
+        result.wait_for_publish(
+            timeout=self.settings.mqtt_connection_timeout
         )
-        if result.rc != mqtt.MQTT_ERR_SUCCESS:
-            logger.error("MQTT publish failed with code %s", result.rc)
-            return False
-        return True
+    except RuntimeError as exc:
+        logger.error(
+            "MQTT publication failed: %s",
+            exc,
+        )
+        return False
+
+    if not result.is_published():
+        logger.error(
+            "MQTT publication was not confirmed"
+        )
+        return False
+
+    return True
 
     def disconnect(self) -> None:
         if not self.started:
