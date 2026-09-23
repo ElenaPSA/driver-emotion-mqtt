@@ -66,54 +66,54 @@ class MqttPublisher:
             raise ConnectionError(self.connection_error)
 
     def publish(
-    self,
-    payload: dict[str, Any],
-) -> bool:
-    if not self.connected.is_set():
-        logger.error(
-            "Cannot publish because MQTT is disconnected"
+        self,
+        payload: dict[str, Any],
+    ) -> bool:
+        if not self.connected.is_set():
+            logger.error(
+                "Cannot publish because MQTT is disconnected"
+            )
+            return False
+
+        message = json.dumps(
+            to_json_value(payload),
+            ensure_ascii=False,
+            allow_nan=False,
+            separators=(",", ":"),
         )
-        return False
 
-    message = json.dumps(
-        to_json_value(payload),
-        ensure_ascii=False,
-        allow_nan=False,
-        separators=(",", ":"),
-    )
-
-    result = self.client.publish(
-        self.settings.mqtt_topic,
-        message,
-        qos=self.settings.mqtt_qos,
-        retain=self.settings.mqtt_retain,
-    )
-
-    if result.rc != mqtt.MQTT_ERR_SUCCESS:
-        logger.error(
-            "MQTT publish failed with code %s",
-            result.rc,
+        result = self.client.publish(
+            self.settings.mqtt_topic,
+            message,
+            qos=self.settings.mqtt_qos,
+            retain=self.settings.mqtt_retain,
         )
-        return False
 
-    try:
-        result.wait_for_publish(
-            timeout=self.settings.mqtt_connection_timeout
-        )
-    except RuntimeError as exc:
-        logger.error(
-            "MQTT publication failed: %s",
-            exc,
-        )
-        return False
+        if result.rc != mqtt.MQTT_ERR_SUCCESS:
+            logger.error(
+                "MQTT publish failed with code %s",
+                result.rc,
+            )
+            return False
 
-    if not result.is_published():
-        logger.error(
-            "MQTT publication was not confirmed"
-        )
-        return False
+        try:
+            result.wait_for_publish(
+                timeout=self.settings.mqtt_connection_timeout
+            )
+        except RuntimeError as exc:
+            logger.error(
+                "MQTT publication failed: %s",
+                exc,
+            )
+            return False
 
-    return True
+        if not result.is_published():
+            logger.error(
+                "MQTT publication was not confirmed"
+            )
+            return False
+
+        return True
 
     def disconnect(self) -> None:
         if not self.started:
