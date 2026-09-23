@@ -1,21 +1,29 @@
 from __future__ import annotations
 
 import asyncio
-import base64
+import json
 import logging
 import queue
 import threading
+from dataclasses import dataclass
 from typing import Any
 
 import cv2
 import numpy as np
-import websockets
+from websockets.asyncio.client import connect
 from websockets.exceptions import ConnectionClosed
+
 
 logger = logging.getLogger(__name__)
 
-# Marker inserted after the final frame.
 _END_OF_STREAM = object()
+
+
+@dataclass(slots=True)
+class VideoFrame:
+    number: int
+    timestamp: float
+    image: Any
 
 
 class WebSocketVideoSource:
@@ -24,17 +32,21 @@ class WebSocketVideoSource:
         host: str,
         port: int,
         queue_size: int = 10,
+        max_size: int = 16 * 1024 * 1024,
     ) -> None:
         self.uri = f"ws://{host}:{port}"
+        self.max_size = max_size
+
         self.running = True
         self.finished = False
 
-        # FIFO queue prevents new frames from overwriting unread frames.
         self.frames: queue.Queue[Any] = queue.Queue(
             maxsize=queue_size
         )
 
+        self.messages_received = 0
         self.received_frames = 0
+        self.invalid_frames = 0
 
         self.thread = threading.Thread(
             target=self._run,
@@ -52,53 +64,49 @@ class WebSocketVideoSource:
             logger.exception(
                 "Unhandled error in WebSocket receiver thread"
             )
+
+        finally:
             self._finish_stream()
 
     async def _receiver(self) -> None:
         try:
-            async with websockets.connect(
+            async with connect(
                 self.uri,
-                ping_interval=None,
+                max_size=self.max_size,
+                compression=None,
+                ping_interval=20,
+                ping_timeout=20,
             ) as websocket:
                 logger.info(
                     "Connected to WebSocket %s",
                     self.uri,
                 )
 
-                while self.running:
-                    try:
-                        message = await websocket.recv()
-
-                    except ConnectionClosed as exc:
-                        if exc.code == 1000:
-                            logger.info(
-                                "WebSocket connection closed normally"
-                            )
-                        else:
-                            logger.warning(
-                                "WebSocket connection closed: "
-                                "code=%s reason=%s",
-                                exc.code,
-                                exc.reason,
-                            )
-
+                async for message in websocket:
+                    if not self.running:
                         break
 
-                    frame = self._decode_frame(message)
+                    self.messages_received += 1
 
-                    if frame is None:
-                        continue
-
-                    self.received_frames += 1
-
-                    if self.received_frames % 100 == 0:
-                        logger.info(
-                            "WebSocket frames received=%d",
-                            self.received_frames,
+                    if isinstance(message, str):
+                        should_stop = self._handle_control_message(
+                            message
                         )
 
-                    # Wait if FER is slower than the WebSocket sender.
-                    # This preserves frames instead of overwriting them.
+                        if should_stop:
+                            break
+
+                        continue
+
+                    frame = self._decode_binary_frame(message)
+
+                    if frame is None:
+                        self.invalid_frames += 1
+                        continue
+
+                    # Blocking put is intentional. When FER is
+                    # slower, the receiver waits rather than
+                    # deleting or overwriting the frame.
                     while self.running:
                         try:
                             self.frames.put(
@@ -109,40 +117,132 @@ class WebSocketVideoSource:
 
                         except queue.Full:
                             logger.debug(
-                                "Frame queue full; "
-                                "waiting for video processor"
+                                "Frame queue full; waiting for "
+                                "the video processor"
                             )
+
+                    if not self.running:
+                        break
+
+                    self.received_frames += 1
+
+                    # Tell the sender that this frame has been
+                    # safely received, decoded and queued.
+                    await websocket.send(
+                        json.dumps(
+                            {
+                                "type": "ack",
+                                "frame": frame.number,
+                            }
+                        )
+                    )
+
+                    if self.received_frames % 100 == 0:
+                        logger.info(
+                            "WebSocket frames received=%d",
+                            self.received_frames,
+                        )
 
         except ConnectionRefusedError:
             logger.exception(
-                "Unable to connect to WebSocket %s",
+                "Unable to connect to WebSocket %s. "
+                "Start video_stream_server.py first.",
                 self.uri,
             )
+
+        except ConnectionClosed as exc:
+            if exc.code == 1000:
+                logger.info(
+                    "WebSocket connection closed normally"
+                )
+            else:
+                logger.warning(
+                    "WebSocket connection closed: "
+                    "code=%s reason=%s",
+                    exc.code,
+                    exc.reason,
+                )
 
         except Exception:
             logger.exception(
                 "WebSocket receiver failed"
             )
 
-        finally:
-            self._finish_stream()
+    def _handle_control_message(
+        self,
+        message: str,
+    ) -> bool:
+        try:
+            control = json.loads(message)
+
+        except json.JSONDecodeError:
+            logger.warning(
+                "Received an invalid WebSocket control message"
+            )
+            return False
+
+        message_type = control.get("type")
+
+        if message_type == "stream_start":
+            logger.info(
+                "Stream started: video=%s fps=%s frames=%s",
+                control.get("video_name"),
+                control.get("fps"),
+                control.get("frame_count"),
+            )
+            return False
+
+        if message_type == "stream_end":
+            logger.info(
+                "Stream ended: server sent %s frames",
+                control.get("frames_sent"),
+            )
+            return True
+
+        if message_type == "error":
+            logger.error(
+                "Video server error: %s",
+                control.get("message"),
+            )
+            return True
+
+        logger.warning(
+            "Unknown WebSocket control message: %s",
+            control,
+        )
+
+        return False
 
     @staticmethod
-    def _decode_frame(
-        message: str | bytes,
-    ) -> Any | None:
+    def _decode_binary_frame(
+        message: bytes,
+    ) -> VideoFrame | None:
         try:
-            if isinstance(message, str):
-                image_bytes = base64.b64decode(
-                    message,
-                    validate=True,
+            # Binary format:
+            # first line = JSON metadata
+            # remaining bytes = JPEG image
+            separator_index = message.find(b"\n")
+
+            if separator_index < 0:
+                logger.warning(
+                    "Frame message has no metadata separator"
                 )
-            else:
-                image_bytes = message
+                return None
+
+            metadata_bytes = message[:separator_index]
+            image_bytes = message[separator_index + 1:]
+
+            metadata = json.loads(
+                metadata_bytes.decode("utf-8")
+            )
+
+            frame_number = int(metadata["frame"])
+            timestamp = float(metadata["timestamp"])
 
             if not image_bytes:
                 logger.warning(
-                    "Received empty WebSocket payload"
+                    "Received empty image for frame %d",
+                    frame_number,
                 )
                 return None
 
@@ -151,43 +251,40 @@ class WebSocketVideoSource:
                 dtype=np.uint8,
             )
 
-            if image_array.size == 0:
-                logger.warning(
-                    "Received empty image array"
-                )
-                return None
-
             frame = cv2.imdecode(
                 image_array,
                 cv2.IMREAD_COLOR,
             )
 
-            if frame is None:
+            if frame is None or frame.size == 0:
                 logger.warning(
-                    "OpenCV could not decode received frame"
+                    "OpenCV could not decode frame %d",
+                    frame_number,
                 )
                 return None
 
-            if frame.size == 0:
-                logger.warning(
-                    "Received zero-size decoded frame"
-                )
-                return None
+            return VideoFrame(
+                number=frame_number,
+                timestamp=timestamp,
+                image=frame,
+            )
 
-            # This return was missing in your current script.
-            return frame
-
-        except (ValueError, TypeError) as exc:
+        except (
+            KeyError,
+            TypeError,
+            ValueError,
+            UnicodeDecodeError,
+            json.JSONDecodeError,
+        ) as exc:
             logger.warning(
-                "Invalid Base64 frame payload: %s",
+                "Invalid binary frame message: %s",
                 exc,
             )
             return None
 
-        except Exception as exc:
-            logger.warning(
-                "Invalid frame received: %s",
-                exc,
+        except Exception:
+            logger.exception(
+                "Unexpected error decoding WebSocket frame"
             )
             return None
 
@@ -198,8 +295,7 @@ class WebSocketVideoSource:
         self.finished = True
         self.running = False
 
-        # This marker is inserted after all frames already queued.
-        # read() receives it only after consuming every queued frame.
+        # Frames already in the queue remain before the marker.
         while True:
             try:
                 self.frames.put(
@@ -209,20 +305,23 @@ class WebSocketVideoSource:
                 break
 
             except queue.Full:
-                # The processor is still consuming queued frames.
+                # The processor is still consuming frames.
                 continue
 
         logger.info(
-            "WebSocket input ended after receiving %d frames",
+            "WebSocket input finished: "
+            "messages=%d valid_frames=%d invalid_frames=%d",
+            self.messages_received,
             self.received_frames,
+            self.invalid_frames,
         )
 
-    def read(self) -> Any | None:
+    def read(self) -> VideoFrame | None:
         item = self.frames.get()
 
         if item is _END_OF_STREAM:
             logger.info(
-                "All queued WebSocket frames have been consumed"
+                "All queued WebSocket frames consumed"
             )
             return None
 
