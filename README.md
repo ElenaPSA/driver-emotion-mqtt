@@ -1,81 +1,241 @@
-# Driver Emotion MQTT
-
-Detect facial emotions in a driver-facing video, publish per-frame telemetry over MQTT, and save complete and dominant-emotion results as JSON.
-
-## Architecture
-
-- `config.py`: typed environment-based settings
-- `broker.py`: optional embedded aMQTT broker
-- `mqtt_publisher.py`: Paho MQTT lifecycle and publishing
-- `emotion_detector.py`: FER inference and driver-face selection
-- `video_processor.py`: OpenCV processing pipeline
-- `main.py`: async application lifecycle and CLI
-
-## Requirements
-
-- Python 3.10 to 3.12
-- A video file, or adjust `VIDEO_PATH`
-- A desktop session when `DISPLAY_VIDEO=true`
-
 ## Installation
 
+## Prerequisites
+
+Required software:
+
+- Python 3.10+
+- RTMaps
+- Git
+- MQTT Broker (Mosquitto or embedded aMQTT)
+
+Verify Python version:
+
 ```bash
-python -m venv .venv
+python3 --version
+```
+
+---
+
+# Clone Repository
+
+```bash
+git clone <repository>
+cd driver-emotion-mqtt
+```
+
+---
+
+# Create Virtual Environment
+
+Create the virtual environment:
+
+```bash
+python3 -m venv .venv
+```
+
+Activate it:
+
+Linux:
+
+```bash
 source .venv/bin/activate
-python -m pip install --upgrade pip setuptools wheel
-pip install -e ".[dev]"
 ```
 
-## Run with the embedded broker
+Windows:
 
-```bash
-cp .env.example .env
-# Environment variables may be exported manually; .env is an example only.
-export VIDEO_PATH=output.mp4
-export START_EMBEDDED_BROKER=true
-driver-emotion
+```powershell
+.venv\Scripts\activate
 ```
 
-Or:
+---
 
-```bash
-python -m driver_emotion_mqtt
+# Install the Project
+
+The project uses:
+
+```text
+pyproject.toml
 ```
 
-## Connect to an external Mosquitto broker
+Install the package and all dependencies:
 
 ```bash
-export START_EMBEDDED_BROKER=false
-export MQTT_BROKER=192.168.1.20
+pip install --upgrade pip
+
+pip install -e .
+```
+
+The option:
+
+```bash
+-e
+```
+
+installs the package in editable mode.
+
+This allows modifying the source code without reinstalling the package after every change.
+
+---
+
+# Verify Installation
+
+Verify that the package is visible:
+
+```bash
+python -c "import driver_emotion_mqtt; print('OK')"
+```
+
+Expected output:
+
+```text
+OK
+```
+
+---
+
+# Project Layout
+
+```text
+driver-emotion-mqtt/
+│
+├── pyproject.toml
+│
+├── outputs/
+│
+└── src/
+    └── driver_emotion_mqtt/
+        │
+        ├── main.py
+        ├── config.py
+        ├── websocket_video_source.py
+        ├── video_processor.py
+        ├── emotion_detector.py
+        ├── mqtt_publisher.py
+        ├── broker.py
+        └── serialization.py
+```
+
+---
+
+# Environment Configuration
+
+## WebSocket
+
+RTMaps runs the WebSocket server.
+
+If RTMaps runs on the same machine:
+
+```bash
+export WEBSOCKET_URI='ws://127.0.0.1:8765/socket'
+```
+
+If RTMaps runs on another machine:
+
+```bash
+export WEBSOCKET_URI='ws://RTMAPS_HOST:8765/socket'
+```
+
+---
+
+## MQTT
+
+```bash
+export MQTT_BROKER=127.0.0.1
+
 export MQTT_PORT=1883
-python -m driver_emotion_mqtt
 ```
 
-Example subscriber:
+---
+
+## Frame Processing
+
+Analyse every frame:
 
 ```bash
-mosquitto_sub -h 127.0.0.1 -p 1883 -t 'telemetry/DriverEmotionState' -v
+export PROCESS_EVERY_N_FRAMES=1
 ```
 
-## Headless execution
+---
+
+## Acknowledgements
+
+Recommended:
 
 ```bash
-export DISPLAY_VIDEO=false
-python -m driver_emotion_mqtt
+export WEBSOCKET_SEND_ACK=true
 ```
 
-## Tests and linting
+RTMaps waits for a frame acknowledgement before removing it from its transmission queue.
+
+This prevents silent frame loss.
+
+---
+
+## Video Display
+
+Optional:
 
 ```bash
-pytest
-ruff check .
+export DISPLAY_VIDEO=true
 ```
 
-## Output
+Displays:
 
-Files are written under `outputs/` by default:
+- face bounding boxes
+- detected emotion
+- confidence score
 
-- `captured_emotions.json`
-- `dominant_emotion.json`
+---
 
-Press `q` or `Esc` to stop when video display is enabled.
+# Running the Emotion Detector
+
+Activate the environment:
+
+```bash
+source .venv/bin/activate
+```
+
+Start the application:
+
+```bash
+python -m driver_emotion_mqtt.main
+```
+
+Expected logs:
+
+```text
+Connecting to RTMaps WebSocket
+
+Connected to RTMaps WebSocket
+
+Initializing FER detector
+
+Connected to MQTT broker
+```
+
+---
+
+# Development Installation
+
+If new dependencies are added to:
+
+```text
+pyproject.toml
+```
+
+reinstall the package:
+
+```bash
+pip install -e .
+```
+
+---
+
+# Upgrade Dependencies
+
+```bash
+pip install --upgrade pip
+
+pip install -e .
+```
