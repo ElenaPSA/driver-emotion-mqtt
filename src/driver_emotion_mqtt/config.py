@@ -42,7 +42,7 @@ class Settings:
     websocket_uri: str = field(
         default_factory=lambda: os.getenv(
             "WEBSOCKET_URI",
-            "ws://127.0.0.1:8765",
+            "ws://127.0.0.1:8765/socket",
         )
     )
 
@@ -73,19 +73,10 @@ class Settings:
         )
     )
 
-    websocket_reconnect_delay: float = field(
-        default_factory=lambda: float(
-            os.getenv(
-                "WEBSOCKET_RECONNECT_DELAY",
-                "1.0",
-            )
-        )
-    )
-
     websocket_send_ack: bool = field(
         default_factory=lambda: _as_bool(
             "WEBSOCKET_SEND_ACK",
-            False,
+            True,
         )
     )
 
