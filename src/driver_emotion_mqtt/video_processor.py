@@ -11,7 +11,6 @@ from .emotion_detector import DriverEmotionDetector
 from .mqtt_publisher import MqttPublisher
 from .serialization import save_json
 from .websocket_video_source import (
-    VideoFrame,
     WebSocketVideoSource,
 )
 
@@ -32,24 +31,26 @@ def _render(
     for detection in detections:
         box = detection.get("box", [])
 
-        if len(box) >= 4:
-            x, y, width, height = map(
-                int,
-                box[:4],
-            )
+        if len(box) < 4:
+            continue
 
-            x = max(0, x)
-            y = max(0, y)
-            width = max(0, width)
-            height = max(0, height)
+        x, y, width, height = map(
+            int,
+            box[:4],
+        )
 
-            cv2.rectangle(
-                output,
-                (x, y),
-                (x + width, y + height),
-                (0, 255, 0),
-                2,
-            )
+        x = max(0, x)
+        y = max(0, y)
+        width = max(0, width)
+        height = max(0, height)
+
+        cv2.rectangle(
+            output,
+            (x, y),
+            (x + width, y + height),
+            (0, 255, 0),
+            2,
+        )
 
     cv2.putText(
         output,
@@ -76,11 +77,13 @@ def _render(
     return output
 
 
-def process_video(settings: Settings) -> None:
+def process_video(
+    settings: Settings,
+) -> None:
     settings.validate()
 
     logger.info(
-        "WebSocket source=%s",
+        "RTMaps WebSocket source=%s",
         settings.websocket_uri,
     )
 
@@ -116,10 +119,7 @@ def process_video(settings: Settings) -> None:
         publisher.connect()
 
         source = WebSocketVideoSource(
-            host=settings.websocket_host,
-            port=settings.websocket_port,
-            queue_size=settings.websocket_queue_size,
-            max_size=settings.websocket_max_size,
+            settings
         )
 
         while True:
@@ -127,7 +127,7 @@ def process_video(settings: Settings) -> None:
 
             if received_frame is None:
                 logger.info(
-                    "End of WebSocket video stream"
+                    "End of RTMaps WebSocket stream"
                 )
                 break
 
@@ -138,7 +138,7 @@ def process_video(settings: Settings) -> None:
             frame = received_frame.image
 
             if (
-                (frame_number - 1)
+                (frames_read - 1)
                 % settings.process_every_n_frames
                 != 0
             ):
@@ -153,7 +153,10 @@ def process_video(settings: Settings) -> None:
 
             common = {
                 "frame": frame_number,
-                "timestamp": round(timestamp, 3),
+                "timestamp": round(
+                    timestamp,
+                    3,
+                ),
             }
 
             all_emotions.append(
@@ -171,7 +174,7 @@ def process_video(settings: Settings) -> None:
                 }
             )
 
-            payload = {
+            mqtt_payload = {
                 "name": "DriverEmotionState",
                 "data": {
                     **common,
@@ -181,7 +184,7 @@ def process_video(settings: Settings) -> None:
                 },
             }
 
-            if publisher.publish(payload):
+            if publisher.publish(mqtt_payload):
                 messages_published += 1
             else:
                 publish_failures += 1
@@ -193,8 +196,8 @@ def process_video(settings: Settings) -> None:
                 == 0
             ):
                 logger.info(
-                    "Frame %d | %.3fs | faces=%d | "
-                    "emotion=%s | confidence=%s",
+                    "RTMaps frame=%d | timestamp=%.3fs | "
+                    "faces=%d | emotion=%s | confidence=%s",
                     frame_number,
                     timestamp,
                     len(detections),
@@ -258,7 +261,8 @@ def process_video(settings: Settings) -> None:
 
         logger.info(
             "Finished: read=%d processed=%d skipped=%d "
-            "published=%d publish_failures=%d elapsed=%.2fs",
+            "published=%d publish_failures=%d "
+            "elapsed=%.2fs",
             frames_read,
             frames_processed,
             frames_skipped,
