@@ -1,106 +1,100 @@
-## Installation
+# Driver Emotion MQTT - RTMaps Integration
 
-## Prerequisites
+## Overview
 
-Required software:
+Driver Emotion MQTT is a real-time emotion recognition pipeline designed to receive video frames through a WebSocket connection, detect driver emotions using FER (Facial Emotion Recognition), and publish emotion data to MQTT.
 
-- Python 3.10+
-- RTMaps
-- Git
-- MQTT Broker (Mosquitto or embedded aMQTT)
+The system supports two operating modes:
 
-Verify Python version:
+1. **Simulation mode**
+   - Video frames come from `rtmaps_simulator.py`
+   - Used during development and testing.
 
-```bash
-python3 --version
-```
-
----
-
-# Clone Repository
-
-```bash
-git clone <repository>
-cd driver-emotion-mqtt
-```
+2. **Production mode**
+   - Video frames come from a real RTMaps diagram.
+   - RTMaps acquires images from an external camera and sends them through a WebSocket.
 
 ---
 
-# Create Virtual Environment
+# High-Level Architecture
 
-Create the virtual environment:
-
-```bash
-python3 -m venv .venv
-```
-
-Activate it:
-
-Linux:
-
-```bash
-source .venv/bin/activate
-```
-
-Windows:
-
-```powershell
-.venv\Scripts\activate
-```
-
----
-
-# Install the Project
-
-The project uses:
+## Simulation Mode
 
 ```text
-pyproject.toml
+output.mp4
+     │
+     ▼
+rtmaps_simulator.py
+     │
+     │ WebSocket
+     ▼
+websocket_video_source.py
+     │
+     ▼
+video_processor.py
+     │
+     ▼
+emotion_detector.py
+     │
+     ▼
+mqtt_publisher.py
+     │
+     ▼
+Mosquitto / aMQTT
 ```
-
-Install the package and all dependencies:
-
-```bash
-pip install --upgrade pip
-
-pip install -e .
-```
-
-The option:
-
-```bash
--e
-```
-
-installs the package in editable mode.
-
-This allows modifying the source code without reinstalling the package after every change.
 
 ---
 
-# Verify Installation
-
-Verify that the package is visible:
-
-```bash
-python -c "import driver_emotion_mqtt; print('OK')"
-```
-
-Expected output:
+## Production Mode (RTMaps)
 
 ```text
-OK
+External Camera
+     │
+     ▼
+RTMaps Camera Component
+     │
+     ▼
+RTMaps Python Component
+     │
+     │ WebSocket
+     ▼
+websocket_video_source.py
+     │
+     ▼
+video_processor.py
+     │
+     ▼
+emotion_detector.py
+     │
+     ▼
+mqtt_publisher.py
+     │
+     ▼
+Mosquitto / aMQTT
 ```
+
+The only component replaced is:
+
+```text
+rtmaps_simulator.py
+```
+
+which becomes:
+
+```text
+RTMaps Python Component
+```
+
+Everything else remains unchanged.
 
 ---
 
-# Project Layout
+# Project Structure
 
 ```text
 driver-emotion-mqtt/
 │
-├── pyproject.toml
-│
+├── output.mp4
 ├── outputs/
 │
 └── src/
@@ -113,129 +107,530 @@ driver-emotion-mqtt/
         ├── emotion_detector.py
         ├── mqtt_publisher.py
         ├── broker.py
-        └── serialization.py
+        ├── serialization.py
+        ├── rtmaps_simulator.py
+        └── video_stream_server.py
 ```
 
 ---
 
-# Environment Configuration
+# Application Flow
 
-## WebSocket
+For every frame:
 
-RTMaps runs the WebSocket server.
-
-If RTMaps runs on the same machine:
-
-```bash
-export WEBSOCKET_URI='ws://127.0.0.1:8765/socket'
-```
-
-If RTMaps runs on another machine:
-
-```bash
-export WEBSOCKET_URI='ws://RTMAPS_HOST:8765/socket'
+```text
+Camera Frame
+      │
+      ▼
+JPEG Encoding
+      │
+      ▼
+WebSocket
+      │
+      ▼
+Frame Reconstruction
+      │
+      ▼
+Emotion Detection
+      │
+      ▼
+MQTT Publication
 ```
 
 ---
 
-## MQTT
+# Components Description
+
+---
+
+## main.py
+
+### Purpose
+
+Application entry point.
+
+### Responsibilities
+
+- Load configuration
+- Start MQTT broker (optional)
+- Start video processing
+- Handle application shutdown
+
+### Execution
 
 ```bash
-export MQTT_BROKER=127.0.0.1
+python3 -m driver_emotion_mqtt.main
+```
+
+---
+
+## config.py
+
+### Purpose
+
+Centralized application configuration.
+
+### Examples
+
+```python
+websocket_uri
+mqtt_host
+mqtt_port
+mqtt_topic
+process_every_n_frames
+display_video
+```
+
+---
+
+## websocket_video_source.py
+
+### Purpose
+
+Receives images from RTMaps through WebSocket.
+
+### Responsibilities
+
+- Connect to RTMaps WebSocket
+- Receive image payloads
+- Decode Base64 images
+- Decode JPEG images
+- Create VideoFrame objects
+- Store frames in an internal queue
+
+### Output
+
+```python
+VideoFrame(
+    number,
+    timestamp,
+    image
+)
+```
+
+Used by:
+
+```python
+video_processor.py
+```
+
+---
+
+## video_processor.py
+
+### Purpose
+
+Main processing orchestrator.
+
+### Responsibilities
+
+- Read frames
+- Call FER
+- Build MQTT payload
+- Publish emotion information
+- Save JSON outputs
+
+### Processing loop
+
+```python
+frame = source.read()
+
+detections = detector.analyze(frame)
+
+publisher.publish(...)
+```
+
+---
+
+## emotion_detector.py
+
+### Purpose
+
+FER (Facial Emotion Recognition).
+
+### Input
+
+OpenCV image.
+
+### Output
+
+Example:
+
+```json
+{
+  "dominant_emotion": "happy",
+  "confidence": 0.92
+}
+```
+
+### Supported emotions
+
+```text
+Angry
+Disgust
+Fear
+Happy
+Sad
+Surprise
+Neutral
+```
+
+---
+
+## mqtt_publisher.py
+
+### Purpose
+
+Publish FER results through MQTT.
+
+### Example Payload
+
+```json
+{
+  "frame": 152,
+  "timestamp": 5.47,
+  "dominant_emotion": "happy",
+  "confidence": 0.92
+}
+```
+
+### Topic
+
+```text
+telemetry/DriverEmotionState
+```
+
+---
+
+## broker.py
+
+### Purpose
+
+Embedded MQTT broker.
+
+Used only when:
+
+```python
+start_embedded_broker = True
+```
+
+Otherwise Mosquitto is used.
+
+---
+
+## serialization.py
+
+### Purpose
+
+Save and load JSON data.
+
+Example:
+
+```python
+save_json(...)
+```
+
+---
+
+# Simulation Mode
+
+## Purpose
+
+Allows testing without RTMaps.
+
+### Architecture
+
+```text
+Video File
+     │
+     ▼
+rtmaps_simulator.py
+     │
+     ▼
+WebSocket
+```
+
+The simulator behaves exactly like RTMaps.
+
+---
+
+## Starting Simulator
+
+Terminal 1:
+
+```bash
+python3 -m driver_emotion_mqtt.rtmaps_simulator \
+    --source output.mp4 \
+    --host 127.0.0.1 \
+    --port 8765
+```
+
+Terminal 2:
+
+```bash
+python3 -m driver_emotion_mqtt.main
+```
+
+---
+
+# RTMaps Integration
+
+## RTMaps Diagram
+
+Recommended structure:
+
+```text
+External Camera
+       │
+       ▼
+Camera Component
+       │
+       ▼
+RTMaps Python Component
+       │
+       ▼
+WebSocket
+```
+
+---
+
+# RTMaps WebSocket Payload
+
+The RTMaps component should send one message per frame:
+
+```json
+{
+  "type": "frame",
+  "frame": 123,
+  "timestamp": 4.56,
+  "camera_image_b64": "..."
+}
+```
+
+Where:
+
+```text
+frame
+```
+
+is frame number.
+
+```text
+timestamp
+```
+
+is acquisition time.
+
+```text
+camera_image_b64
+```
+
+contains JPEG image encoded in Base64.
+
+---
+
+# Required Modification For Real RTMaps
+
+## websocket_video_source.py
+
+Find:
+
+```python
+base64_image = (
+    payload.get("image")
+    or payload.get("data")
+    or payload.get("frame_data")
+)
+```
+
+Replace with:
+
+```python
+base64_image = (
+    payload.get("camera_image_b64")
+    or payload.get("image")
+    or payload.get("data")
+    or payload.get("frame_data")
+)
+```
+
+This modification is required because RTMaps uses:
+
+```json
+camera_image_b64
+```
+
+to transport the image.
+
+---
+
+# Migration From Simulator To RTMaps
+
+## Current
+
+```text
+output.mp4
+      │
+      ▼
+rtmaps_simulator.py
+      │
+      ▼
+WebSocket
+      │
+      ▼
+FER Pipeline
+```
+
+---
+
+## Future
+
+```text
+External Camera
+      │
+      ▼
+RTMaps
+      │
+      ▼
+WebSocket
+      │
+      ▼
+FER Pipeline
+```
+
+Only the frame producer changes.
+
+---
+
+# Installation
+
+## Create Virtual Environment
+
+```bash
+python3 -m venv driver-emotion
+
+source driver-emotion/bin/activate
+```
+
+---
+
+## Install Dependencies
+
+```bash
+pip install \
+    opencv-python \
+    numpy \
+    websockets \
+    paho-mqtt \
+    amqtt \
+    fer \
+    tensorflow \
+    mtcnn
+```
+
+---
+
+# Configuration
+
+Example:
+
+```bash
+export WEBSOCKET_URI='ws://127.0.0.1:8765'
+
+export MQTT_BROKER='127.0.0.1'
 
 export MQTT_PORT=1883
-```
 
----
+export MQTT_TOPIC='telemetry/DriverEmotionState'
 
-## Frame Processing
-
-Analyse every frame:
-
-```bash
 export PROCESS_EVERY_N_FRAMES=1
+
+export DISPLAY_VIDEO=false
+
+export WEBSOCKET_SEND_ACK=false
 ```
 
 ---
 
-## Acknowledgements
+# Running The Application
 
-Recommended:
+## Simulation Mode
+
+Terminal 1:
 
 ```bash
-export WEBSOCKET_SEND_ACK=true
+python3 -m driver_emotion_mqtt.rtmaps_simulator
 ```
 
-RTMaps waits for a frame acknowledgement before removing it from its transmission queue.
+Terminal 2:
 
-This prevents silent frame loss.
+```bash
+python3 -m driver_emotion_mqtt.main
+```
 
 ---
 
-## Video Display
+## Production Mode
 
-Optional:
+1. Start Mosquitto.
+2. Start RTMaps diagram.
+3. Run:
 
 ```bash
-export DISPLAY_VIDEO=true
+python3 -m driver_emotion_mqtt.main
 ```
-
-Displays:
-
-- face bounding boxes
-- detected emotion
-- confidence score
 
 ---
 
-# Running the Emotion Detector
+# MQTT Output Example
 
-Activate the environment:
-
-```bash
-source .venv/bin/activate
+```json
+{
+  "frame": 225,
+  "timestamp": 8.322,
+  "dominant_emotion": "happy",
+  "confidence": 0.91
+}
 ```
 
-Start the application:
-
-```bash
-python -m driver_emotion_mqtt.main
-```
-
-Expected logs:
+Published to:
 
 ```text
-Connecting to RTMaps WebSocket
-
-Connected to RTMaps WebSocket
-
-Initializing FER detector
-
-Connected to MQTT broker
+telemetry/DriverEmotionState
 ```
 
 ---
 
-# Development Installation
-
-If new dependencies are added to:
+# Final Production Architecture
 
 ```text
-pyproject.toml
+External Camera
+      │
+      ▼
+RTMaps Camera Component
+      │
+      ▼
+RTMaps Python Component
+      │
+      ▼
+WebSocket
+      │
+      ▼
+websocket_video_source.py
+      │
+      ▼
+video_processor.py
+      │
+      ▼
+emotion_detector.py
+      │
+      ▼
+mqtt_publisher.py
+      │
+      ▼
+Mosquitto
 ```
 
-reinstall the package:
+Only the frame producer changes between simulation and production.
 
-```bash
-pip install -e .
-```
-
----
-
-# Upgrade Dependencies
-
-```bash
-pip install --upgrade pip
-
-pip install -e .
-```
+The FER and MQTT pipeline remains exactly the same.
