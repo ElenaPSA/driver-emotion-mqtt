@@ -256,7 +256,8 @@ class WebSocketVideoSource:
             return None, True
 
         base64_image = (
-            payload.get("image")
+            payload.get("camera_image_b64")
+            or payload.get("image")
             or payload.get("data")
             or payload.get("frame_data")
         )
