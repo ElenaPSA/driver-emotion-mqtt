@@ -5,7 +5,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 
-def _as_bool(name: str, default: bool) -> bool:
+def _as_bool(
+    name: str,
+    default: bool,
+) -> bool:
     value = os.getenv(name)
 
     if value is None:
@@ -22,39 +25,33 @@ def _as_bool(name: str, default: bool) -> bool:
 @dataclass(frozen=True, slots=True)
 class Settings:
     # ---------------------------------------------------------
-    # Video file used by video_stream_server.py
+    # Output
     # ---------------------------------------------------------
-    video_path: Path = field(
-        default_factory=lambda: Path(
-            os.getenv("VIDEO_PATH", "output.mp4")
-        )
-    )
-
     output_dir: Path = field(
         default_factory=lambda: Path(
-            os.getenv("OUTPUT_DIR", "outputs")
+            os.getenv(
+                "OUTPUT_DIR",
+                "outputs",
+            )
         )
     )
 
     # ---------------------------------------------------------
-    # WebSocket
+    # RTMaps WebSocket source
     # ---------------------------------------------------------
-    websocket_host: str = field(
+    websocket_uri: str = field(
         default_factory=lambda: os.getenv(
-            "WEBSOCKET_HOST",
-            "127.0.0.1",
-        )
-    )
-
-    websocket_port: int = field(
-        default_factory=lambda: int(
-            os.getenv("WEBSOCKET_PORT", "8765")
+            "WEBSOCKET_URI",
+            "ws://127.0.0.1:8765",
         )
     )
 
     websocket_queue_size: int = field(
         default_factory=lambda: int(
-            os.getenv("WEBSOCKET_QUEUE_SIZE", "10")
+            os.getenv(
+                "WEBSOCKET_QUEUE_SIZE",
+                "10",
+            )
         )
     )
 
@@ -67,9 +64,28 @@ class Settings:
         )
     )
 
-    jpeg_quality: int = field(
-        default_factory=lambda: int(
-            os.getenv("JPEG_QUALITY", "90")
+    websocket_connection_timeout: float = field(
+        default_factory=lambda: float(
+            os.getenv(
+                "WEBSOCKET_CONNECTION_TIMEOUT",
+                "10.0",
+            )
+        )
+    )
+
+    websocket_reconnect_delay: float = field(
+        default_factory=lambda: float(
+            os.getenv(
+                "WEBSOCKET_RECONNECT_DELAY",
+                "1.0",
+            )
+        )
+    )
+
+    websocket_send_ack: bool = field(
+        default_factory=lambda: _as_bool(
+            "WEBSOCKET_SEND_ACK",
+            False,
         )
     )
 
@@ -85,7 +101,10 @@ class Settings:
 
     mqtt_port: int = field(
         default_factory=lambda: int(
-            os.getenv("MQTT_PORT", "1883")
+            os.getenv(
+                "MQTT_PORT",
+                "1883",
+            )
         )
     )
 
@@ -96,18 +115,41 @@ class Settings:
         )
     )
 
-    mqtt_client_id: str = "driver-emotion-detector"
-    mqtt_qos: int = 1
-    mqtt_retain: bool = False
+    mqtt_client_id: str = field(
+        default_factory=lambda: os.getenv(
+            "MQTT_CLIENT_ID",
+            "driver-emotion-detector",
+        )
+    )
+
+    mqtt_qos: int = field(
+        default_factory=lambda: int(
+            os.getenv(
+                "MQTT_QOS",
+                "1",
+            )
+        )
+    )
+
+    mqtt_retain: bool = field(
+        default_factory=lambda: _as_bool(
+            "MQTT_RETAIN",
+            False,
+        )
+    )
+
     mqtt_keepalive: int = 60
     mqtt_connection_timeout: float = 10.0
 
     # ---------------------------------------------------------
-    # Processing
+    # Emotion detection
     # ---------------------------------------------------------
     process_every_n_frames: int = field(
         default_factory=lambda: int(
-            os.getenv("PROCESS_EVERY_N_FRAMES", "1")
+            os.getenv(
+                "PROCESS_EVERY_N_FRAMES",
+                "1",
+            )
         )
     )
 
@@ -125,26 +167,24 @@ class Settings:
         )
     )
 
-    # False means that an external Mosquitto broker must be running.
+    log_every_n_frames: int = field(
+        default_factory=lambda: int(
+            os.getenv(
+                "LOG_EVERY_N_FRAMES",
+                "1",
+            )
+        )
+    )
+
+    # ---------------------------------------------------------
+    # Broker
+    # ---------------------------------------------------------
     start_embedded_broker: bool = field(
         default_factory=lambda: _as_bool(
             "START_EMBEDDED_BROKER",
             True,
         )
     )
-
-    log_every_n_frames: int = field(
-        default_factory=lambda: int(
-            os.getenv("LOG_EVERY_N_FRAMES", "1")
-        )
-    )
-
-    @property
-    def websocket_uri(self) -> str:
-        return (
-            f"ws://{self.websocket_host}:"
-            f"{self.websocket_port}"
-        )
 
     @property
     def captured_emotions_path(self) -> Path:
@@ -161,14 +201,12 @@ class Settings:
         )
 
     def validate(self) -> None:
-        if self.process_every_n_frames < 1:
+        if not self.websocket_uri.startswith(
+            ("ws://", "wss://")
+        ):
             raise ValueError(
-                "PROCESS_EVERY_N_FRAMES must be at least 1"
-            )
-
-        if not 0 <= self.mqtt_qos <= 2:
-            raise ValueError(
-                "MQTT QoS must be between 0 and 2"
+                "WEBSOCKET_URI must start with "
+                "ws:// or wss://"
             )
 
         if self.websocket_queue_size < 1:
@@ -181,7 +219,30 @@ class Settings:
                 "WEBSOCKET_MAX_SIZE must be positive"
             )
 
-        if not 1 <= self.jpeg_quality <= 100:
+        if self.websocket_connection_timeout <= 0:
             raise ValueError(
-                "JPEG_QUALITY must be between 1 and 100"
+                "WEBSOCKET_CONNECTION_TIMEOUT "
+                "must be positive"
+            )
+
+        if self.websocket_reconnect_delay < 0:
+            raise ValueError(
+                "WEBSOCKET_RECONNECT_DELAY "
+                "cannot be negative"
+            )
+
+        if self.process_every_n_frames < 1:
+            raise ValueError(
+                "PROCESS_EVERY_N_FRAMES "
+                "must be at least 1"
+            )
+
+        if not 0 <= self.mqtt_qos <= 2:
+            raise ValueError(
+                "MQTT QoS must be between 0 and 2"
+            )
+
+        if self.log_every_n_frames < 0:
+            raise ValueError(
+                "LOG_EVERY_N_FRAMES cannot be negative"
             )
