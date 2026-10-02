@@ -33,12 +33,33 @@ async def main() -> None:
 
             await broker.start()
             broker_started = True
+
         else:
             logger.info(
                 "Using external MQTT broker at %s:%d",
                 settings.mqtt_host,
                 settings.mqtt_port,
             )
+
+        logger.info(
+            "Starting webcam emotion detection"
+        )
+
+        logger.info(
+            "Camera index=%d",
+            settings.camera_index,
+        )
+
+        logger.info(
+            "Camera resolution=%dx%d",
+            settings.camera_width,
+            settings.camera_height,
+        )
+
+        logger.info(
+            "Camera FPS=%d",
+            settings.camera_fps,
+        )
 
         await asyncio.to_thread(
             process_video,
@@ -50,6 +71,7 @@ async def main() -> None:
             logger.info(
                 "Stopping embedded aMQTT broker"
             )
+
             await broker.shutdown()
 
 
