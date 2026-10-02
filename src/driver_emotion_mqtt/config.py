@@ -22,54 +22,38 @@ def _as_bool(name: str, default: bool) -> bool:
 @dataclass(frozen=True, slots=True)
 class Settings:
     # ---------------------------------------------------------
-    # Video file used by video_stream_server.py
+    # Camera
     # ---------------------------------------------------------
-    video_path: Path = field(
-        default_factory=lambda: Path(
-            os.getenv("VIDEO_PATH", "output.mp4")
+    camera_index: int = field(
+        default_factory=lambda: int(
+            os.getenv("CAMERA_INDEX", "0")
         )
     )
 
+    camera_width: int = field(
+        default_factory=lambda: int(
+            os.getenv("CAMERA_WIDTH", "640")
+        )
+    )
+
+    camera_height: int = field(
+        default_factory=lambda: int(
+            os.getenv("CAMERA_HEIGHT", "480")
+        )
+    )
+
+    camera_fps: int = field(
+        default_factory=lambda: int(
+            os.getenv("CAMERA_FPS", "10")
+        )
+    )
+
+    # ---------------------------------------------------------
+    # Outputs
+    # ---------------------------------------------------------
     output_dir: Path = field(
         default_factory=lambda: Path(
             os.getenv("OUTPUT_DIR", "outputs")
-        )
-    )
-
-    # ---------------------------------------------------------
-    # WebSocket
-    # ---------------------------------------------------------
-    websocket_host: str = field(
-        default_factory=lambda: os.getenv(
-            "WEBSOCKET_HOST",
-            "127.0.0.1",
-        )
-    )
-
-    websocket_port: int = field(
-        default_factory=lambda: int(
-            os.getenv("WEBSOCKET_PORT", "8765")
-        )
-    )
-
-    websocket_queue_size: int = field(
-        default_factory=lambda: int(
-            os.getenv("WEBSOCKET_QUEUE_SIZE", "10")
-        )
-    )
-
-    websocket_max_size: int = field(
-        default_factory=lambda: int(
-            os.getenv(
-                "WEBSOCKET_MAX_SIZE",
-                str(16 * 1024 * 1024),
-            )
-        )
-    )
-
-    jpeg_quality: int = field(
-        default_factory=lambda: int(
-            os.getenv("JPEG_QUALITY", "90")
         )
     )
 
@@ -97,9 +81,13 @@ class Settings:
     )
 
     mqtt_client_id: str = "driver-emotion-detector"
+
     mqtt_qos: int = 1
+
     mqtt_retain: bool = False
+
     mqtt_keepalive: int = 60
+
     mqtt_connection_timeout: float = 10.0
 
     # ---------------------------------------------------------
@@ -107,14 +95,17 @@ class Settings:
     # ---------------------------------------------------------
     process_every_n_frames: int = field(
         default_factory=lambda: int(
-            os.getenv("PROCESS_EVERY_N_FRAMES", "1")
+            os.getenv(
+                "PROCESS_EVERY_N_FRAMES",
+                "1",
+            )
         )
     )
 
     display_video: bool = field(
         default_factory=lambda: _as_bool(
             "DISPLAY_VIDEO",
-            False,
+            True,
         )
     )
 
@@ -125,7 +116,6 @@ class Settings:
         )
     )
 
-    # False means that an external Mosquitto broker must be running.
     start_embedded_broker: bool = field(
         default_factory=lambda: _as_bool(
             "START_EMBEDDED_BROKER",
@@ -135,16 +125,12 @@ class Settings:
 
     log_every_n_frames: int = field(
         default_factory=lambda: int(
-            os.getenv("LOG_EVERY_N_FRAMES", "1")
+            os.getenv(
+                "LOG_EVERY_N_FRAMES",
+                "1",
+            )
         )
     )
-
-    @property
-    def websocket_uri(self) -> str:
-        return (
-            f"ws://{self.websocket_host}:"
-            f"{self.websocket_port}"
-        )
 
     @property
     def captured_emotions_path(self) -> Path:
@@ -161,9 +147,31 @@ class Settings:
         )
 
     def validate(self) -> None:
+
+        if self.camera_index < 0:
+            raise ValueError(
+                "CAMERA_INDEX must be >= 0"
+            )
+
+        if self.camera_width < 1:
+            raise ValueError(
+                "CAMERA_WIDTH must be positive"
+            )
+
+        if self.camera_height < 1:
+            raise ValueError(
+                "CAMERA_HEIGHT must be positive"
+            )
+
+        if self.camera_fps < 1:
+            raise ValueError(
+                "CAMERA_FPS must be positive"
+            )
+
         if self.process_every_n_frames < 1:
             raise ValueError(
-                "PROCESS_EVERY_N_FRAMES must be at least 1"
+                "PROCESS_EVERY_N_FRAMES "
+                "must be at least 1"
             )
 
         if not 0 <= self.mqtt_qos <= 2:
@@ -171,17 +179,8 @@ class Settings:
                 "MQTT QoS must be between 0 and 2"
             )
 
-        if self.websocket_queue_size < 1:
+        if self.log_every_n_frames < 1:
             raise ValueError(
-                "WEBSOCKET_QUEUE_SIZE must be at least 1"
-            )
-
-        if self.websocket_max_size < 1:
-            raise ValueError(
-                "WEBSOCKET_MAX_SIZE must be positive"
-            )
-
-        if not 1 <= self.jpeg_quality <= 100:
-            raise ValueError(
-                "JPEG_QUALITY must be between 1 and 100"
+                "LOG_EVERY_N_FRAMES "
+                "must be at least 1"
             )
