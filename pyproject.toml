@@ -20,6 +20,8 @@ dependencies = [
     "moviepy<2",
     "numpy",
     "websockets",
+    "pyopengl", 
+    "cython",
 ]
 
 [project.optional-dependencies]
